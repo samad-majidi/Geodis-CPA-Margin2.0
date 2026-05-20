@@ -7,6 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
 :root{--primary:#2563EB;--primary-light:#3B82F6;--sidebar:#0F172A;--sidebar-hover:#334155;--bg:#F1F5F9;--card:#fff;--border:#E2E8F0;--text:#0F172A;--text-light:#475569;--text-muted:#94A3B8;--green:#10B981;--red:#EF4444;--amber:#F59E0B;--purple:#8B5CF6;--shadow-sm:0 1px 2px rgba(0,0,0,.05);--shadow-md:0 2px 8px rgba(0,0,0,.08);--shadow-lg:0 4px 16px rgba(0,0,0,.12);--radius-sm:8px;--radius-md:14px}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -157,9 +158,51 @@ input[type="range"]{accent-color:var(--primary);width:100%;cursor:pointer}
 #fuel-surcharge-card .fs-table .fs-link{font-size:12px;color:var(--primary);text-decoration:none}
 #fuel-surcharge-card .fs-table .fs-link:hover{text-decoration:underline}
 #fuel-surcharge-card .fs-table .fs-updated{font-size:11px;color:var(--text-muted)}
+/* Authentication styles */
+#auth-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);display:flex;align-items:center;justify-content:center;z-index:9999}
+#auth-container{background:#fff;border-radius:20px;box-shadow:0 20px 60px rgba(0,0,0,.3);padding:48px 40px;text-align:center;max-width:420px;width:90%}
+#auth-container h1{font-size:28px;font-weight:700;color:#0F172A;margin-bottom:12px}
+#auth-container p{font-size:15px;color:#64748B;margin-bottom:32px;line-height:1.6}
+#auth-error{background:#FEE2E2;color:#991B1B;padding:12px 16px;border-radius:10px;margin-top:20px;font-size:14px;display:none}
+.app-content{display:none}
+.app-content.authenticated{display:block}
+#sign-out-btn{position:fixed;top:20px;right:20px;background:#fff;color:#0F172A;border:1px solid var(--border);padding:10px 20px;border-radius:10px;font-size:14px;font-weight:500;cursor:pointer;z-index:1000;display:none;align-items:center;gap:8px;box-shadow:var(--shadow-md);transition:.2s}
+#sign-out-btn:hover{background:#F1F5F9;box-shadow:var(--shadow-lg)}
+#sign-out-btn.show{display:flex}
 </style>
 </head>
 <body>
+<!-- Authentication Overlay -->
+<div id="auth-overlay">
+<div id="auth-container">
+<h1>🔒 Firstbase 3PL Access</h1>
+<p>This application is restricted to authorized Firstbase and AppDirect team members.</p>
+<div id="g_id_onload"
+     data-client_id="175628222582-0bllveutilh1bm96fq5pkotgbqo8vc67.apps.googleusercontent.com"
+     data-callback="handleCredentialResponse"
+     data-auto_prompt="false">
+</div>
+<div class="g_id_signin"
+     data-type="standard"
+     data-size="large"
+     data-theme="outline"
+     data-text="sign_in_with"
+     data-shape="rectangular"
+     data-logo_alignment="left">
+</div>
+<div id="auth-error"></div>
+</div>
+</div>
+
+<!-- Sign Out Button -->
+<button id="sign-out-btn">
+<i class="fas fa-sign-out-alt"></i>
+<span id="user-email"></span>
+Sign Out
+</button>
+
+<!-- App Content -->
+<div class="app-content">
 <div class="sidebar">
 <div class="logo">
 <h2>Firstbase 3PL</h2>
@@ -3515,6 +3558,76 @@ function renderDashboard() {
   document.getElementById('dash-region-health').innerHTML = healthHTML;
 }
 renderDashboard();
+
+// ============================================
+// AUTHENTICATION LOGIC
+// ============================================
+const ALLOWED_DOMAINS = ['@firstbase.com', '@appdirect.com'];
+
+function handleCredentialResponse(response) {
+  // Decode JWT token (Google ID token)
+  const payload = parseJwt(response.credential);
+  const email = payload.email;
+
+  // Check if email ends with allowed domains
+  const isAuthorized = ALLOWED_DOMAINS.some(domain => email.endsWith(domain));
+
+  if (isAuthorized) {
+    // Store auth state
+    sessionStorage.setItem('authenticated', 'true');
+    sessionStorage.setItem('userEmail', email);
+
+    // Show app, hide overlay
+    showApp(email);
+  } else {
+    // Show error message
+    const errorDiv = document.getElementById('auth-error');
+    errorDiv.textContent = `Access denied. Only ${ALLOWED_DOMAINS.join(' and ')} email addresses are allowed.`;
+    errorDiv.style.display = 'block';
+  }
+}
+
+function parseJwt(token) {
+  const base64Url = token.split('.')[1];
+  const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+  }).join(''));
+  return JSON.parse(jsonPayload);
+}
+
+function showApp(email) {
+  document.getElementById('auth-overlay').style.display = 'none';
+  document.querySelector('.app-content').classList.add('authenticated');
+  document.getElementById('sign-out-btn').classList.add('show');
+  document.getElementById('user-email').textContent = email;
+}
+
+function signOut() {
+  sessionStorage.removeItem('authenticated');
+  sessionStorage.removeItem('userEmail');
+  document.getElementById('auth-overlay').style.display = 'flex';
+  document.querySelector('.app-content').classList.remove('authenticated');
+  document.getElementById('sign-out-btn').classList.remove('show');
+  document.getElementById('auth-error').style.display = 'none';
+
+  // Revoke Google token
+  google.accounts.id.disableAutoSelect();
+}
+
+// Check if already authenticated on page load
+window.addEventListener('DOMContentLoaded', function() {
+  const authenticated = sessionStorage.getItem('authenticated');
+  const email = sessionStorage.getItem('userEmail');
+
+  if (authenticated === 'true' && email) {
+    showApp(email);
+  }
+
+  // Set up sign out button
+  document.getElementById('sign-out-btn').addEventListener('click', signOut);
+});
 </script>
+</div><!-- End app-content -->
 </body>
 </html>
